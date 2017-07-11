@@ -11,7 +11,7 @@ class val HandlerMaker is HandlerFactory
 
 class Handler is HTTPHandler
   let _out: StdStream tag
-  let _session: HTTPSession
+  let _session: HTTPSession tag
 
   new create(out: StdStream tag, session: HTTPSession tag) =>
     _out = out
@@ -19,6 +19,6 @@ class Handler is HTTPHandler
 
   fun ref apply(request: Payload val): Any =>
     let response = request.response()
-    let resp = "sup dood\nURL: " + request.url.string() + "\n"
+    let resp = "sup dewd\nURL: " + request.url.string() + "\n"
     response.add_chunk(resp)
     _session(consume response)
