@@ -15,3 +15,4 @@ fi
 
 mkdir -p build
 CC=gcc ponyc --pic -o build src
+mv build/src build/otter
