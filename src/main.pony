@@ -1,84 +1,81 @@
 use "collections"
-use "net"
-use "net/http"
+use "itertools"
 
 actor Main
   let _out: StdStream
   new create(env: Env) =>
     _out = env.out
-    // match env.root
-    //   | None => env.err.print("no ambient auth!")
-    //   | let auth: AmbientAuth =>
-    //       HTTPServer(
-    //         where auth = auth,
-    //               logger = CommonLog(env.out),
-    //               notify = recover Notify(env.out) end,
-    //               handler = HandlerMaker(env.out),
-    //               host = "0.0.0.0",
-    //               service = "8080"
-    //       )
-    // end
-    let coord = PMapCoordinator[U32, U32](recover Range[U32](1, 20) end, 5, this)
-    coord({(x: U32): U32 => x * 2} val)
-
-  be send_result(vs: Iterator[Any val] iso) =>
-    _out.write("result: ")
-    let vs': Iterator[Any val] ref = consume vs
-    for v in vs' do
-      match v
-        | let n: U32 => _out.write(n.string() + ", ")
-        else _out.write("<unknown type>, ")
-      end
+    run()
+    
+  fun tag run() =>
+    let l: List[U32] val = recover
+      let l' = List[U32]
+      l'.concat(Range[U32](0, 100))
+      l'
     end
-    _out.print("")
-
-interface tag PMapResult
-  be send_result(v: Iterator[Any iso] iso)
-
-actor PMapCoordinator[In: Any val, Out: Any #send]
-  let _chunks: List[List[In] val] = List[List[In] val]
-  let _endpoint: PMapResult tag
-
-  let _results: MapIs[U32, List[Out]] iso = recover MapIs[U32, List[Out]] end
-
-  new create(vals': Iterator[In] iso, parallelism': U32, endpoint': PMapResult tag) =>
-    var i: U32 = 0
-    var chunk: List[In] iso = recover List[In] end
-    let vs': Iterator[In] ref = consume vals'
-    for v in vs' do
-      if (i > 0) and ((i % parallelism') == 0) then
-        _chunks.push(consume chunk)
-        chunk = recover List[In] end
-      end
-      chunk.push(v)
-      i = i + 1
-    end
-    _endpoint = endpoint'
-
-  be apply(f: {(In): Out} val) =>
-    var i: U32 = 0
-    for c in _chunks.values() do
-      PMapWorker[In, Out](c, i, f, this)
-      i = i + 1
-    end
-
-  be _receive(chunk: List[Out] iso, cidx: U32) =>
-    _results(cidx) = consume chunk
-    if _results.size() == _chunks.size() then
-      let flat: List[Out] iso = recover List[Out] end
-      for ci in Range[U32](0, _chunks.size().u32()) do
-        try
-          (_, let r: Out) = _results.remove(ci)
-          flat.append_list(consume r)
+    PMapper[U32, U32](
+      l,
+      {(x: U32): U32^ => x * 2} val,
+      {(xs: List[U32] val, ixs: List[USize] val)(self = this) =>
+        self._print_list[U32](xs)
+        self._print[String]("is sorted? " + self.is_sorted(ixs).string())
+        if not self.is_sorted(ixs) then
+          self._print_list[USize](ixs)
         end
-      end
-      _endpoint.send_result(flat.values())
+      } val
+    )
+
+  fun tag is_sorted(list: List[USize] val): Bool =>
+    for (f, s) in Iter[USize](list.values()).zip[USize](Iter[USize](list.values()).skip(1)) do
+      if f > s then return false end
+    end
+    true
+
+  be _print[X: Stringable val](x: X) =>
+    _out.print(x.string())
+
+  be _print_list[X: Stringable #read](lis: List[X] val) =>
+    _out.write("[")
+    for x in lis.values() do
+      _out.write(x.string() + ", ")
+    end
+    if lis.size() > 0 then
+      _out.write("\b\b")
+    end
+    _out.print("]")
+
+actor PMapper[A: Any val, B: Any val]
+  be apply(input: List[A] val, f: {(A): B^} val, cb: {(List[B] val, List[USize] val)} val) =>
+    let hop = _Hopper[B](cb, input.size())
+    for (v, i) in Zip2[A, USize](input.values(), Range(0, input.size())) do
+      _Worker[A, B](v, f, i, hop)
     end
 
-actor PMapWorker[In: Any val, Out: Any #send]
-  be apply(chunk: List[In] val, cidx: U32, f: {(In): Out} val, coord: PMapCoordinator[In, Out] tag) =>
-    let res: List[Out] iso = recover List[Out] end
-    for v in chunk.values() do
-      let r = f(v)
-      res.push(consume r)
+actor _Worker[A: Any val, B: Any val]
+  be apply(v: A, f: {(A): B^} val, i: USize, hop: _Hopper[B] tag) =>
+    hop.store(f(v), i)
+
+actor _Hopper[B: Any val]
+  let _cb: {(List[B] val, List[USize] val)} val
+  let _results: Array[(B | None)]
+  let _indexes: List[USize] = List[USize]
+
+  new create(cb: {(List[B] val, List[USize] val)} val, c: USize) =>
+    _cb = cb
+    _results = Array[(B | None)]
+    _results.concat(Iter[None](Repeat[None](None)).take(c))
+
+  be store(v: B, i: USize) =>
+    try
+      _results(i) = v
+      _indexes.push(i)
+    end
+    if (_indexes.size() == _results.size()) then
+      let res_list: List[B] iso = recover List[B] end
+      let idx_list: List[USize] iso = recover List[USize] end
+      for (r, ix) in Zip2[(B | None), USize](_results.values(), _indexes.values()) do
+        try res_list.push(r as B) end
+        idx_list.push(ix)
+      end
+      _cb(consume res_list, consume idx_list)
     end
