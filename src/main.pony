@@ -5,77 +5,42 @@ actor Main
   let _out: StdStream
   new create(env: Env) =>
     _out = env.out
-    run()
-    
-  fun tag run() =>
-    let l: List[U32] val = recover
-      let l' = List[U32]
-      l'.concat(Range[U32](0, 100))
-      l'
-    end
-    PMapper[U32, U32](
-      l,
-      {(x: U32): U32^ => x * 2} val,
-      {(xs: List[U32] val, ixs: List[USize] val)(self = this) =>
-        self._print_list[U32](xs)
-        self._print[String]("is sorted? " + self.is_sorted(ixs).string())
-        if not self.is_sorted(ixs) then
-          self._print_list[USize](ixs)
-        end
-      } val
-    )
+    Jobs.source[U32](42)
+    .run_into(MappedJob[U32, U32]({(x: U32): U32 => x * 2} val)
+               .>run_into(
+                 object
+                   be pour(i: U32) =>
+                     env.out.print("received " + i.string())
+                 end
+               ).>pour(42))
 
-  fun tag is_sorted(list: List[USize] val): Bool =>
-    for (f, s) in Iter[USize](list.values()).zip[USize](Iter[USize](list.values()).skip(1)) do
-      if f > s then return false end
-    end
-    true
+interface tag Sink[A: Any #send]
+  be pour(a: A)
 
-  be _print[X: Stringable val](x: X) =>
-    _out.print(x.string())
+interface tag Job[A: Any #send]
+  be run_into(sink: Sink[A])
 
-  be _print_list[X: Stringable #read](lis: List[X] val) =>
-    _out.write("[")
-    for x in lis.values() do
-      _out.write(x.string() + ", ")
-    end
-    if lis.size() > 0 then
-      _out.write("\b\b")
-    end
-    _out.print("]")
+actor MappedJob[A: Any #send, B: Any val] is (Sink[A] & Job[B])
+  let _body: {(A): B^} val
+  var _result: (B | None) = None
+  let _sinks: List[Sink[B]] = List[Sink[B]]
 
-actor PMapper[A: Any val, B: Any val]
-  be apply(input: List[A] val, f: {(A): B^} val, cb: {(List[B] val, List[USize] val)} val) =>
-    let hop = _Hopper[B](cb, input.size())
-    for (v, i) in Zip2[A, USize](input.values(), Range(0, input.size())) do
-      _Worker[A, B](v, f, i, hop)
+  new create(body: {(A): B^} val) =>
+    _body = body
+
+  be pour(a: A) =>
+    _result = _body(consume a)
+    for sink in _sinks.values() do
+      try sink.pour(_result as B) end
+    end
+    _sinks.clear()
+
+  be run_into(sink: Sink[B]) =>
+    match _result
+      | let r': B => sink.pour(r')
+      | None => _sinks.push(sink)
     end
 
-actor _Worker[A: Any val, B: Any val]
-  be apply(v: A, f: {(A): B^} val, i: USize, hop: _Hopper[B] tag) =>
-    hop.store(f(v), i)
-
-actor _Hopper[B: Any val]
-  let _cb: {(List[B] val, List[USize] val)} val
-  let _results: Array[(B | None)]
-  let _indexes: List[USize] = List[USize]
-
-  new create(cb: {(List[B] val, List[USize] val)} val, c: USize) =>
-    _cb = cb
-    _results = Array[(B | None)]
-    _results.concat(Iter[None](Repeat[None](None)).take(c))
-
-  be store(v: B, i: USize) =>
-    try
-      _results(i) = v
-      _indexes.push(i)
-    end
-    if (_indexes.size() == _results.size()) then
-      let res_list: List[B] iso = recover List[B] end
-      let idx_list: List[USize] iso = recover List[USize] end
-      for (r, ix) in Zip2[(B | None), USize](_results.values(), _indexes.values()) do
-        try res_list.push(r as B) end
-        idx_list.push(ix)
-      end
-      _cb(consume res_list, consume idx_list)
-    end
+primitive Jobs
+  fun source[A: Any val](a: A): Job[A] =>
+    MappedJob[None, A]({(x: None): A^ => a} val).>pour(None)
