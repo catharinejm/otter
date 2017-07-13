@@ -6,19 +6,10 @@ actor Main
   new create(env: Env) =>
     _out = env.out
     let chan = Channel[U32]
-    Reader(_out, chan)
+    chan.read({(n: U32) => _out.print("received: " + n.string())} val)
+    chan.read({(n: U32) => _out.print("received: " + n.string())} val)
     chan.write(123)
-    chan.read({(n: U32) => _out.print("received: " + n.string())} val)
-    chan.read({(n: U32) => _out.print("received: " + n.string())} val)
     chan.write(456)
-    
-actor Reader
-
-  let _chan: Channel[U32]
-  
-  new create(out: StdStream, chan': Channel[U32]) =>
-    _chan = chan'
-
 
 actor Channel[A: Any val]
 
