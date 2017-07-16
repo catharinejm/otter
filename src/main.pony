@@ -1,6 +1,7 @@
 use "collections"
 use p = "collections/persistent"
 use "crypto"
+use "format"
 use "itertools"
 use "random"
 use "time"
@@ -159,7 +160,7 @@ actor Announcer is Sub
     _out = out'
 
   be apply(events: Events, md5_bys: Bytes) =>
-    var new_md5: Bytes = recover Bytes end
+    var new_md5: Bytes = _rolling_md5
     for ev in Iter[Event](events.reverse().values()) do
       let new_bys: Bytes = recover
         let b = new_md5.clone()
@@ -168,8 +169,20 @@ actor Announcer is Sub
       end
       new_md5 = MD5(new_bys)
     end
+    _out.write("Sent MD5:     ")
+    for b in md5_bys.values() do
+      _out.write(Format.int[U8](b, FormatHexBare where width = 2, fill = '0'))
+    end
+    _out.write("\n")
+    _out.write("Computed MD5: ")
+    for b in new_md5.values() do
+      _out.write(Format.int[U8](b, FormatHexBare where width = 2, fill = '0'))
+    end
+    _out.write("\n")
     if not Arrays.equal[U8](md5_bys, new_md5) then
       _out.print("**** ERROR: md5 does not match!")
+    else
+      _rolling_md5 = new_md5
     end
     let now = Millis(Time.now())
     for ev in events.values() do
