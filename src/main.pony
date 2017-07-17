@@ -11,14 +11,14 @@ actor Main
   new create(env: Env) =>
     _out = env.out
     let pub = Publisher
-    let pub2 = Publisher
+    // let pub2 = Publisher
     let sub = Subscriber(_out, Announcer(_out))
     pub.sub(sub)
-    pub2.sub(sub)
+    // pub2.sub(sub)
 
     let timers = Timers
-    timers(Timer(Notify(_out, pub, "Pub 1"), 0, Nanos.from_seconds(1)))
-    timers(Timer(Notify(_out, pub, "Pub 2"), Nanos.from_millis(500), Nanos.from_millis(500)))
+    timers(Timer(Notify(_out, pub, "Pub 1"), 0, Nanos.from_millis(500)))
+    // timers(Timer(Notify(_out, pub, "Pub 2"), Nanos.from_millis(500), Nanos.from_millis(500)))
 
 class iso Notify is TimerNotify
   let _pub: Publisher
